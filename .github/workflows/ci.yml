@@ -19,9 +19,9 @@ jobs:
           go-version-file: go.mod
           check-latest: true
 
-      - uses: golangci/golangci-lint-action@v6
+      - uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          version: v2.12.2
 
   test:
     runs-on: ubuntu-latest
