@@ -16,8 +16,7 @@ import (
 )
 
 const (
-	Name    = "hashpoint-plugin-soggl"
-	Version = "1.0.0"
+	Name = "hashpoint-plugin-soggl"
 
 	cfgEntraScope = "entra_scope"
 	cfgSogglHost  = "soggl_host"
@@ -28,6 +27,13 @@ const (
 
 	defaultJobsWindow = windowToday
 )
+
+// pluginVersion is overridden at release time via GoReleaser's
+// `-X github.com/.../internal/plugin.pluginVersion={{ .Version }}` ldflag,
+// so the git tag is the single source of truth for the version reported
+// by Metadata(). The "dev" placeholder is what regular `go build` (e.g.
+// in CI's vet/test step, or a local dev build) produces.
+var pluginVersion = "dev"
 
 // config is the validated, in-memory form of sdk.PluginConfig.
 type config struct {
@@ -62,7 +68,7 @@ func (p *Plugin) Init(_ context.Context, host sdk.HostAPI) error {
 func (p *Plugin) Metadata(_ context.Context) (sdk.Metadata, error) {
 	return sdk.Metadata{
 		Name:         Name,
-		Version:      Version,
+		Version:      pluginVersion,
 		APIVersion:   sdk.HostAPIVersion,
 		Capabilities: []sdk.Capability{sdk.CapTagProvider},
 		Description:  "Tag provider bridging Hashpoint with the internal Soggl application.",

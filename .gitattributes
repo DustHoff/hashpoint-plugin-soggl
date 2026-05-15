@@ -1,0 +1,7 @@
+* text=auto
+
+# Shell scripts must keep LF endings even on Windows checkouts so the
+# Linux CI runner (which executes scripts/inject-manifest-version.sh
+# via /bin/sh during goreleaser before-hooks) does not choke on
+# CRLF + a "/bin/sh\r: not found" error.
+*.sh text eol=lf

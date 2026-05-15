@@ -5,6 +5,7 @@ project_name: hashpoint-plugin-soggl
 before:
   hooks:
     - go mod tidy
+    - sh scripts/inject-manifest-version.sh {{ .Version }}
 
 builds:
   - id: hashpoint-plugin-soggl
@@ -23,6 +24,9 @@ builds:
       # -H=windowsgui sets the PE subsystem so Windows does not allocate
       # a console window when the host launches the plugin subprocess.
       - -H=windowsgui
+      # Inject the release version into the in-source placeholder
+      # `pluginVersion = "dev"` so Metadata().Version reports the git tag.
+      - -X github.com/dusthoff/hashpoint-plugin-soggl/internal/plugin.pluginVersion={{ .Version }}
 
 archives:
   - id: default
@@ -31,9 +35,16 @@ archives:
     formats:
       - zip
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    wrap_in_directory: hashpoint-plugin-soggl
+    # Nest every archive entry inside a `hashpoint-plugin-soggl/` directory
+    # so consumers (the Hashpoint host's PluginManagement handler installs
+    # into <PluginsDir>/<name>/) get a ready-to-drop plugin folder when
+    # they extract the zip rather than loose files at the archive root.
+    wrap_in_directory: "{{ .ProjectName }}"
     files:
-      - manifest.toml
+      # Use the version-substituted manifest produced by the inject hook
+      # above, not the in-source placeholder manifest.toml.
+      - src: manifest.toml.versioned
+        dst: manifest.toml
 
 checksum:
   split: true
@@ -46,3 +57,20 @@ release:
 
 changelog:
   use: github
+  sort: asc
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\(.+\))??!?:.+$'
+      order: 0
+    - title: Bug Fixes
+      regexp: '^.*?fix(\(.+\))??!?:.+$'
+      order: 1
+    - title: Others
+      order: 999
+  filters:
+    exclude:
+      - "^docs:"
+      - "^chore:"
+      - "^test:"
+      - "^ci:"
+      - "Merge pull request"

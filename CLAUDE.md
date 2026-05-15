@@ -92,35 +92,69 @@ token, expiresAt, err := host.RequestEntraToken(ctx, []string{cfg.EntraScope})
 
 ## Versioning (SemVer)
 
-Version components are driven by SDK and change type:
+Version components follow Semantic Versioning and are derived automatically
+from Conventional-Commit prefixes by the release workflow on push to `main`:
 
-- **MAJOR** = the `sdk.HostAPIVersion` this plugin is built against. Today
-  `HostAPIVersion = 1`, so plugin versions are `1.x.y`. A bump of the SDK API
-  version forces a major bump here.
-- **MINOR** — incremented on every new feature.
-- **PATCH** — incremented on every bug fix.
+- **MAJOR** — `feat!:` / `fix!:` / `chore!:` or a `BREAKING CHANGE:` footer.
+- **MINOR** — `feat:` commit.
+- **PATCH** — `fix:` commit.
+- Other prefixes (`chore:`, `ci:`, `docs:`, `test:`, `refactor:`, …) do **not**
+  bump the version. A push containing only such commits is a no-op for the
+  release workflow.
 
-The version string lives in three places that **must** stay in lockstep — a
-release is only valid if all three agree:
+**Plugin-MAJOR must mirror SDK-MAJOR.** The plugin's MAJOR version equals
+`sdk.HostAPIVersion` (see `require github.com/dusthoff/hashpoint vX.Y.Z` in
+`go.mod`). Today `HostAPIVersion = 1`, so plugin versions are `1.x.y`. If
+the SDK ever bumps to v2, the next plugin release MUST include a `feat!:` /
+`fix!:` / `chore!:` commit (or `BREAKING CHANGE:` footer) so the plugin-major
+follows — even if the plugin's own changes are not breaking. Rationale: the
+SDK major defines the plugin contract (`HostAPIVersion`, interfaces); a
+mismatch would render the version number useless as a compatibility signal.
 
-1. **Git tag** — the release tag (e.g. `v1.4.2`) pushed to GitHub.
-2. **`manifest.toml`** — `version = "x.y.z"` and `api_version = <HostAPIVersion>`.
-3. **`Metadata()` return** — `Version: "x.y.z"`, `APIVersion: sdk.HostAPIVersion`.
+**The git tag is the single source of truth for the version.** In-source
+version values are placeholders and MUST NOT be edited by hand:
 
-Any drift (tag without matching manifest, manifest without matching
-`Metadata()`, etc.) is a release blocker. CI should fail the build if these
-diverge.
+- `pluginVersion` in `internal/plugin/plugin.go` stays at `"dev"`.
+- `version` in `manifest.toml` stays at `"0.0.0-dev"`.
+
+GoReleaser injects the real version at release time:
+
+- `pluginVersion` via `-X` ldflag (see `.goreleaser.yml` → `builds.ldflags`).
+- `manifest.toml.version` via `scripts/inject-manifest-version.sh`, run as a
+  `before.hooks` step. The script writes a version-substituted
+  `manifest.toml.versioned` (repo root, gitignored); the archive references
+  it as `manifest.toml`. The substitution happens outside `dist/` because
+  GoReleaser's "ensuring distribution directory" pipe runs after
+  `before.hooks` and rejects a non-empty `dist/` even with `--clean`.
+
+Local `go build` / `go test` therefore show `"dev"` as the version. Release
+binaries show the tag version. `TestMetadata_VersionIsPlaceholder` in
+`internal/plugin/plugin_test.go` blocks accidental hardcoding of the
+placeholder.
+
+The `api_version` field in `manifest.toml` IS edited by hand and MUST equal
+`sdk.HostAPIVersion`. `TestManifestApiVersionMatchesSDK` guards this.
 
 ## Release workflow
 
-- Every change ships as a **PR** in the GitHub repository. No direct commits
-  to the default branch.
-- A PR is either a feature (minor bump) or a fix (patch bump); the PR
-  description states which and updates `manifest.toml` + `Metadata()`
-  accordingly.
-- GitHub Actions builds the release artifact (plugin executable +
-  `manifest.toml`) on tag push. The tag, `manifest.toml` `version`, and
-  `Metadata().Version` must all match — see "Versioning".
+- Every change ships as a **PR** against `main`. No direct commits to the
+  default branch.
+- Commits MUST follow Conventional Commits (`feat:`, `fix:`, `chore:`,
+  `ci:`, `docs:`, `refactor:`, …). The PR title (squash-merge subject) is
+  what the release workflow inspects, so the PR title MUST follow
+  Conventional Commits.
+- On every push to `main`, `.github/workflows/release.yml`:
+  1. Seeds a `v0.0.0` baseline tag on the initial commit if no tag exists
+     yet (one-shot bootstrap; subsequent runs skip this step).
+  2. Runs `mathieudutour/github-tag-action`, which inspects commits since the
+     last tag, decides the bump, and pushes the new `vX.Y.Z` tag. If no
+     bumpable commit has landed, no tag is created and the workflow ends.
+  3. Runs GoReleaser against the new tag, building the Windows binary,
+     injecting the version, and publishing a GitHub Release with the archive
+     + `.sha256` sidecar.
+- The workflow can also be triggered manually via `workflow_dispatch`; in
+  that mode it forces a **PATCH** bump so a release-tooling-only change can
+  produce a fresh release without a bumpable commit.
 - **Every release artifact MUST ship with a SHA256 checksum as a `.sha256`
   sidecar file.** Configured in `.goreleaser.yml` under `checksum`:
   - `split: true` (one sidecar per artifact, not a combined checksums file)

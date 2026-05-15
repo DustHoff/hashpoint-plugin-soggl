@@ -2,38 +2,74 @@ name: Release
 
 on:
   push:
-    tags:
-      - "v*.*.*"
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  goreleaser:
+  release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v5
+      # mathieudutour/github-tag-action falls back to a synthetic "v0.0.0"
+      # when no real tag exists; that synthetic ref is not a git revision,
+      # so `git log v0.0.0..HEAD` yields zero commits and the action skips
+      # the bump. Seed v0.0.0 on the initial commit once so the action has
+      # a real baseline to count from. Subsequent runs hit the `else`
+      # branch and the seed is a no-op.
+      - name: Seed baseline tag if repository has none
+        run: |
+          git fetch --tags --force
+          if [ -z "$(git tag -l)" ]; then
+            INITIAL_COMMIT=$(git rev-list --max-parents=0 HEAD | head -n1)
+            echo "::notice::No tags found, seeding v0.0.0 on initial commit ${INITIAL_COMMIT}"
+            git tag v0.0.0 "${INITIAL_COMMIT}"
+            git push origin v0.0.0
+          else
+            echo "Tags exist, skipping seed"
+          fi
+
+      - name: Bump version (Conventional Commits → SemVer)
+        id: tag
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          # On normal pushes: only feat/fix/BREAKING-CHANGE produce a bump.
+          # On manual workflow_dispatch: force a patch bump so the user can
+          # mint a fresh release even when no bumpable commits have landed
+          # since the last tag (e.g. to apply a release-tooling change).
+          default_bump: ${{ github.event_name == 'workflow_dispatch' && 'patch' || 'false' }}
+          release_branches: main
+
+      # mathieudutour/github-tag-action creates the new tag via the GitHub
+      # REST API, so the workflow's local checkout never learns about it.
+      # GoReleaser then runs `git describe --tags --exact-match HEAD`,
+      # finds no tag, and errors out with
+      #   "git tag <ver> was not made against commit <sha>".
+      # Pull the freshly-pushed tag back into the local repo before
+      # GoReleaser starts.
+      - name: Fetch newly created tag into local repo
+        if: steps.tag.outputs.new_tag != ''
+        run: git fetch --tags --force
+
+      - name: Setup Go
+        if: steps.tag.outputs.new_tag != ''
+        uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           check-latest: true
 
-      - name: Verify version lockstep (tag == manifest.toml)
-        run: |
-          tag="${GITHUB_REF_NAME}"
-          tag_version="${tag#v}"
-          manifest_version="$(awk -F'"' '/^version[[:space:]]*=/ {print $2; exit}' manifest.toml)"
-          if [ "$tag_version" != "$manifest_version" ]; then
-            echo "::error::git tag $tag (=$tag_version) does not match manifest.toml version $manifest_version"
-            exit 1
-          fi
-
-      - uses: goreleaser/goreleaser-action@v6
+      - name: GoReleaser
+        if: steps.tag.outputs.new_tag != ''
+        uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GORELEASER_CURRENT_TAG: ${{ steps.tag.outputs.new_tag }}
