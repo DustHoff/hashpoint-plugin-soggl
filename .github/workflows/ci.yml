@@ -9,6 +9,20 @@ permissions:
   contents: read
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12.2
+
   test:
     runs-on: ubuntu-latest
     steps:
@@ -37,4 +51,6 @@ jobs:
           CGO_ENABLED: "0"
           GOOS: windows
           GOARCH: amd64
-        run: go build -o /tmp/hashpoint-plugin-soggl.exe ./cmd/hashpoint-plugin-soggl
+        # Mirrors .goreleaser.yml: -H=windowsgui suppresses the console
+        # window when the host launches the plugin subprocess on Windows.
+        run: go build -trimpath -ldflags="-s -w -H=windowsgui" -o /tmp/hashpoint-plugin-soggl.exe ./cmd/hashpoint-plugin-soggl
