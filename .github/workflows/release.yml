@@ -16,23 +16,13 @@ jobs:
         with:
           fetch-depth: 0
 
-      # mathieudutour/github-tag-action falls back to a synthetic "v0.0.0"
-      # when no real tag exists; that synthetic ref is not a git revision,
-      # so `git log v0.0.0..HEAD` yields zero commits and the action skips
-      # the bump. Seed v0.0.0 on the initial commit once so the action has
-      # a real baseline to count from. Subsequent runs hit the `else`
-      # branch and the seed is a no-op.
-      - name: Seed baseline tag if repository has none
-        run: |
-          git fetch --tags --force
-          if [ -z "$(git tag -l)" ]; then
-            INITIAL_COMMIT=$(git rev-list --max-parents=0 HEAD | head -n1)
-            echo "::notice::No tags found, seeding v0.0.0 on initial commit ${INITIAL_COMMIT}"
-            git tag v0.0.0 "${INITIAL_COMMIT}"
-            git push origin v0.0.0
-          else
-            echo "Tags exist, skipping seed"
-          fi
+      # No automatic baseline-tag seed. The default GITHUB_TOKEN does not
+      # carry the `workflows` permission, so it cannot push a tag that
+      # references a commit containing `.github/workflows/*` files — and
+      # the initial commit of this repo does (see run #25935512641). The
+      # baseline `v1.0.0` is therefore set ONCE manually by the maintainer
+      # at repo bootstrap (see "Release workflow" in CLAUDE.md); from then
+      # on mathieudutour/github-tag-action counts bumps from that tag.
 
       - name: Bump version (Conventional Commits → SemVer)
         id: tag
