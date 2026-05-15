@@ -1,0 +1,43 @@
+version: 2
+
+project_name: hashpoint-plugin-soggl
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: hashpoint-plugin-soggl
+    main: ./cmd/hashpoint-plugin-soggl
+    binary: hashpoint-plugin-soggl
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - windows
+    goarch:
+      - amd64
+    ldflags:
+      - -s -w
+
+archives:
+  - id: default
+    ids:
+      - hashpoint-plugin-soggl
+    formats:
+      - zip
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    wrap_in_directory: hashpoint-plugin-soggl
+    files:
+      - manifest.toml
+
+checksum:
+  split: true
+  algorithm: sha256
+  name_template: "{{ .ArtifactName }}.sha256"
+
+release:
+  draft: false
+  prerelease: auto
+
+changelog:
+  use: github

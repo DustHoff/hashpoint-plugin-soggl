@@ -1,0 +1,15 @@
+name         = "hashpoint-plugin-soggl"
+version      = "1.0.0"
+api_version  = 1
+description  = "Tag provider bridging Hashpoint with the internal Soggl application."
+capabilities = ["tag_provider"]
+
+[config_schema.fields.entra_scope]
+label    = "Entra Scope"
+type     = "text"
+required = true
+
+[config_schema.fields.soggl_host]
+label    = "Soggl Host"
+type     = "text"
+required = true
