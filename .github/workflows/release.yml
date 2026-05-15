@@ -16,20 +16,25 @@ jobs:
         with:
           fetch-depth: 0
 
-      # mathieudutour/github-tag-action falls back to a synthetic "v0.0.0"
+      # mathieudutour/github-tag-action falls back to a synthetic baseline
       # when no real tag exists; that synthetic ref is not a git revision,
-      # so `git log v0.0.0..HEAD` yields zero commits and the action skips
-      # the bump. Seed v0.0.0 on the initial commit once so the action has
-      # a real baseline to count from. Subsequent runs hit the `else`
-      # branch and the seed is a no-op.
+      # so `git log <baseline>..HEAD` yields zero commits and the action
+      # skips the bump. Seed a real baseline tag on the initial commit
+      # once so the action has something to count from. Subsequent runs
+      # hit the `else` branch and the seed is a no-op.
+      #
+      # Baseline is v1.0.0 (not v0.0.0) because CLAUDE.md "Versioning
+      # (SemVer)" requires Plugin-MAJOR == sdk.HostAPIVersion, and the
+      # SDK is currently v1. Starting from v1.0.0 means the first
+      # bumpable commit produces a regel-konformes vX.Y.Z >= v1.0.0.
       - name: Seed baseline tag if repository has none
         run: |
           git fetch --tags --force
           if [ -z "$(git tag -l)" ]; then
             INITIAL_COMMIT=$(git rev-list --max-parents=0 HEAD | head -n1)
-            echo "::notice::No tags found, seeding v0.0.0 on initial commit ${INITIAL_COMMIT}"
-            git tag v0.0.0 "${INITIAL_COMMIT}"
-            git push origin v0.0.0
+            echo "::notice::No tags found, seeding v1.0.0 on initial commit ${INITIAL_COMMIT}"
+            git tag v1.0.0 "${INITIAL_COMMIT}"
+            git push origin v1.0.0
           else
             echo "Tags exist, skipping seed"
           fi

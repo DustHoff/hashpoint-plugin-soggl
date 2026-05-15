@@ -144,8 +144,11 @@ The `api_version` field in `manifest.toml` IS edited by hand and MUST equal
   what the release workflow inspects, so the PR title MUST follow
   Conventional Commits.
 - On every push to `main`, `.github/workflows/release.yml`:
-  1. Seeds a `v0.0.0` baseline tag on the initial commit if no tag exists
-     yet (one-shot bootstrap; subsequent runs skip this step).
+  1. Seeds a `v1.0.0` baseline tag on the initial commit if no tag exists
+     yet (one-shot bootstrap; subsequent runs skip this step). The seed
+     starts at `v1.0.0` — not `v0.0.0` — so the first bumpable commit
+     produces a regel-konformes `v1.x.y` per the Plugin-MAJOR =
+     SDK-MAJOR rule above.
   2. Runs `mathieudutour/github-tag-action`, which inspects commits since the
      last tag, decides the bump, and pushes the new `vX.Y.Z` tag. If no
      bumpable commit has landed, no tag is created and the workflow ends.
