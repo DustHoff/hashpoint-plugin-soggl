@@ -1,5 +1,7 @@
 name         = "hashpoint-plugin-soggl"
-version      = "1.0.0"
+# version is rewritten by scripts/inject-manifest-version.sh at release time
+# (called from .goreleaser.yml `before.hooks`). Leave at "0.0.0-dev" in source.
+version      = "0.0.0-dev"
 api_version  = 1
 description  = "Tag provider bridging Hashpoint with the internal Soggl application."
 capabilities = ["tag_provider"]

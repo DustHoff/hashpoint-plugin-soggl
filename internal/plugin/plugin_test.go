@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"context"
 	"errors"
 	"os"
 	"regexp"
@@ -103,24 +104,35 @@ func TestParseConfigBadWindow(t *testing.T) {
 	}
 }
 
-// TestVersionMatchesManifest guards the manifest↔code half of the three-way
-// version invariant (the third leg, tag↔manifest, is enforced in
-// release.yml). Failing here means someone bumped one of plugin.Version
-// or manifest.toml without bumping the other.
-func TestVersionMatchesManifest(t *testing.T) {
+// TestMetadata_VersionIsPlaceholder guards against accidental version
+// hardcoding. The in-source `pluginVersion` MUST stay at the "dev"
+// placeholder so the GoReleaser `-X` ldflag (set from the git tag) is the
+// only path through which a real version string reaches Metadata().
+//
+// If you are tempted to change the placeholder here: don't — bump the tag
+// instead and let the release workflow inject it. See the
+// "Release-Pipeline & Versionierung" section in CLAUDE.md.
+func TestMetadata_VersionIsPlaceholder(t *testing.T) {
+	p := New()
+	m, err := p.Metadata(context.Background())
+	if err != nil {
+		t.Fatalf("Metadata: %v", err)
+	}
+	if m.Version != "dev" {
+		t.Errorf("Metadata.Version = %q, want %q (build-time injection placeholder)", m.Version, "dev")
+	}
+}
+
+// TestManifestApiVersionMatchesSDK guards the manifest↔SDK half of the
+// api-version invariant: a plugin compiled against sdk.HostAPIVersion=N
+// must declare api_version=N in its manifest so the host's compatibility
+// check accepts it. The version field is exempt — it is rewritten at
+// release time by scripts/inject-manifest-version.sh.
+func TestManifestApiVersionMatchesSDK(t *testing.T) {
 	data, err := os.ReadFile("../../manifest.toml")
 	if err != nil {
 		t.Fatal(err)
 	}
-	verRe := regexp.MustCompile(`(?m)^version\s*=\s*"([^"]+)"`)
-	verMatch := verRe.FindStringSubmatch(string(data))
-	if verMatch == nil {
-		t.Fatal("could not extract version from manifest.toml")
-	}
-	if verMatch[1] != Version {
-		t.Errorf("manifest.toml version=%q, plugin.Version=%q", verMatch[1], Version)
-	}
-
 	apiRe := regexp.MustCompile(`(?m)^api_version\s*=\s*(\d+)`)
 	apiMatch := apiRe.FindStringSubmatch(string(data))
 	if apiMatch == nil {
