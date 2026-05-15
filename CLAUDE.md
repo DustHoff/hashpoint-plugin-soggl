@@ -144,14 +144,27 @@ The `api_version` field in `manifest.toml` IS edited by hand and MUST equal
   what the release workflow inspects, so the PR title MUST follow
   Conventional Commits.
 - On every push to `main`, `.github/workflows/release.yml`:
-  1. Seeds a `v0.0.0` baseline tag on the initial commit if no tag exists
-     yet (one-shot bootstrap; subsequent runs skip this step).
-  2. Runs `mathieudutour/github-tag-action`, which inspects commits since the
-     last tag, decides the bump, and pushes the new `vX.Y.Z` tag. If no
-     bumpable commit has landed, no tag is created and the workflow ends.
-  3. Runs GoReleaser against the new tag, building the Windows binary,
-     injecting the version, and publishing a GitHub Release with the archive
-     + `.sha256` sidecar.
+  1. Runs `mathieudutour/github-tag-action`, which inspects commits since
+     the last tag, decides the bump, and pushes the new `vX.Y.Z` tag. If
+     no bumpable commit has landed, no tag is created and the workflow
+     ends.
+  2. Runs GoReleaser against the new tag, building the Windows binary,
+     injecting the version, and publishing a GitHub Release with the
+     archive + `.sha256` sidecar.
+
+  A baseline tag is **not** seeded automatically: the default
+  `GITHUB_TOKEN` does not carry the `workflows` permission and is refused
+  by the GitHub API when it tries to push a tag onto a commit that
+  contains `.github/workflows/*` files (which our initial commit does).
+  The baseline `v1.0.0` is therefore set **once manually** by the
+  maintainer from a workstation that has `workflows`-scoped credentials:
+
+  ```sh
+  git tag v1.0.0 <initial-or-current-main-sha>
+  git push origin v1.0.0
+  ```
+
+  After that the workflow runs unattended on every push.
 - The workflow can also be triggered manually via `workflow_dispatch`; in
   that mode it forces a **PATCH** bump so a release-tooling-only change can
   produce a fresh release without a bumpable commit.
