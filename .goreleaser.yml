@@ -16,8 +16,13 @@ builds:
       - windows
     goarch:
       - amd64
+    flags:
+      - -trimpath
     ldflags:
       - -s -w
+      # -H=windowsgui sets the PE subsystem so Windows does not allocate
+      # a console window when the host launches the plugin subprocess.
+      - -H=windowsgui
 
 archives:
   - id: default

@@ -13,3 +13,9 @@ required = true
 label    = "Soggl Host"
 type     = "text"
 required = true
+
+[config_schema.fields.jobs_window]
+label    = "Jobs window"
+type     = "text"
+required = false
+default  = "today"

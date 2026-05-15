@@ -22,3 +22,6 @@ dist/
 
 # Claude Code local state
 .claude/
+
+# Local sample data (not part of the plugin)
+samples/
