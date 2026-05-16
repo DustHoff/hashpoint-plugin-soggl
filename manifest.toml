@@ -27,3 +27,9 @@ label    = "Sync tag-order changes to Soggl"
 type     = "boolean"
 required = false
 default  = "true"
+
+[config_schema.fields.leaf_only_sync]
+label    = "Only sync leaf tags to Soggl"
+type     = "boolean"
+required = false
+default  = "true"

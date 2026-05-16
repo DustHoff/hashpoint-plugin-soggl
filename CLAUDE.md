@@ -108,6 +108,7 @@ This plugin's config fields:
 | `soggl_host`    | text    | Base hostname / URL of the internal Soggl service (e.g. `https://soggl.internal`).                                                                                            |
 | `jobs_window`   | text    | `today` (default) or `month` — window the `ListOrders` call asks Soggl for.                                                                                                   |
 | `sync_to_soggl` | boolean | Default `true`. When `false`, `NotifyTagOrders` returns immediately and the plugin makes no writes to Soggl — useful as a kill-switch when Soggl is read-only or unavailable. |
+| `leaf_only_sync` | boolean | Default `true`. When `true`, only Hashpoint tags whose path is a leaf in the snapshot (no other tag uses it as a strict prefix) become Soggl rules; parent tags are skipped, even if they carry an `OrderName`. Set to `false` to restore the pre-feature behaviour where every tag with an `OrderName` is synced regardless of position in the hierarchy. |
 
 No secret fields today — authentication uses the host-provided Entra token,
 not a stored credential. If a future feature needs a stored secret, add it as
@@ -125,6 +126,19 @@ rules:
 - **Filter is the join key.** A Hashpoint `TagPath` of `lmis/betrieb`
   becomes the Soggl `filter` `"#lmis #betrieb"` (`pathToFilter` in
   `plugin.go`). The plugin looks up Soggl rules by this filter string.
+- **Leaf-only by default (`leaf_only_sync=true`).** Only Hashpoint tags
+  with no descendants in the snapshot become Soggl rules. The snapshot
+  delivers EVERY tag the host knows (also those without an
+  `OrderName`), so `buildParentSet` computes the parent set strictly
+  from the snapshot's shape. A tag with subtags is skipped from
+  Create/Update/Blank — its existing Soggl rule then drops into the
+  disable phase like any other unowned rule. Self-heals: the moment the
+  last descendant disappears, the parent becomes a leaf again and the
+  next sync re-activates its rule (`enabled=true`). Disable with
+  `leaf_only_sync=false` to keep the pre-feature behaviour where every
+  tag with an `OrderName` is synced regardless of hierarchy position.
+  `ListTags` (Soggl → Hashpoint) is unaffected — Hashpoint's
+  `EnsureByPath` creates parent tags itself when a leaf is imported.
 - **Lowest-id wins on duplicate filters.** Soggl tolerates multiple
   rules with the same filter (e.g. `#ivz` appears twice in
   `samples/soggl-rules.json`). The plugin treats the rule with the
