@@ -34,6 +34,11 @@ Interfaces this plugin must implement (from `sdk.go`):
 - `sdk.TagProviderHandler` —
   - `ListTags(ctx) ([]sdk.ImportedTag, error)`
   - `ListOrders(ctx) ([]sdk.Order, error)`
+  - `NotifyTagOrders(ctx, []sdk.TagOrderMapping) error` — fire-and-forget
+    push from the host on every user-side tag mutation. Plugin must
+    implement the method even if it does nothing; missing it makes the
+    type fail the interface check and the host drops the `tag_provider`
+    slot at start-up.
 
 Entry point: `func main() { sdk.Serve(impl) }`. `sdk.PluginMap` auto-registers
 the `tag_provider` adapter when the implementation satisfies
@@ -65,14 +70,60 @@ Configured via Hashpoint's Plugins tab; the host delivers values through
 
 This plugin's config fields:
 
-| Key           | Type | Purpose                                                                              |
-|---------------|------|--------------------------------------------------------------------------------------|
-| `entra_scope` | text | Scope used when requesting the Entra access token for the Soggl API.                 |
-| `soggl_host`  | text | Base hostname / URL of the internal Soggl service (e.g. `https://soggl.internal`).   |
+| Key             | Type    | Purpose                                                                                                                                                                       |
+|-----------------|---------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `entra_scope`   | text    | Scope used when requesting the Entra access token for the Soggl API.                                                                                                          |
+| `soggl_host`    | text    | Base hostname / URL of the internal Soggl service (e.g. `https://soggl.internal`).                                                                                            |
+| `jobs_window`   | text    | `today` (default) or `month` — window the `ListOrders` call asks Soggl for.                                                                                                   |
+| `sync_to_soggl` | boolean | Default `true`. When `false`, `NotifyTagOrders` returns immediately and the plugin makes no writes to Soggl — useful as a kill-switch when Soggl is read-only or unavailable. |
 
 No secret fields today — authentication uses the host-provided Entra token,
 not a stored credential. If a future feature needs a stored secret, add it as
 `FieldTypePassword` and redeem via `HostAPI.RedeemSecret`.
+
+## Hashpoint → Soggl sync (NotifyTagOrders)
+
+`NotifyTagOrders` is the host's fire-and-forget push of *every* tag in
+the host store with its currently-assigned `OrderName` (empty when the
+tag has no mapping). The plugin maps each Hashpoint tag to a Soggl rule
+and pushes the diff. Key contract decisions — change only with explicit
+user sign-off, because changing them mid-flight can mass-toggle Soggl
+rules:
+
+- **Filter is the join key.** A Hashpoint `TagPath` of `lmis/betrieb`
+  becomes the Soggl `filter` `"#lmis #betrieb"` (`pathToFilter` in
+  `plugin.go`). The plugin looks up Soggl rules by this filter string.
+- **Lowest-id wins on duplicate filters.** Soggl tolerates multiple
+  rules with the same filter (e.g. `#ivz` appears twice in
+  `samples/soggl-rules.json`). The plugin treats the rule with the
+  lowest numeric `id` as the one to update; siblings fall through to
+  the disable phase.
+- **All Soggl rules are considered plugin-managed.** Every rule that
+  does *not* match a current Hashpoint tag with `OrderName != ""` gets
+  `enabled=false` (idempotent — already-disabled rules are left
+  untouched). Consequence: a rule the user creates directly in the
+  Soggl UI is disabled on the next sync. The kill-switch
+  (`sync_to_soggl=false`) is the escape hatch.
+- **Hashpoint owns `filter`, `soncosoAssignment.fragment`, and
+  `enabled` when a tag claims the rule.** Other fields (`score`,
+  `nonBillable`, `ignore`, `autoIgnoreTimelessRecords`) round-trip
+  unchanged. When a tag with an `OrderName` matches a rule, the sync
+  forces `enabled=true` so a previously-orphaned-then-re-mapped rule
+  self-heals; when a tag clears its `OrderName`, the matched rule
+  keeps `enabled=true` and only blanks `fragment`. Brand-new rules
+  are created with `score=0`, `enabled=true`,
+  `nonBillable.pattern="#NF"`, everything else zero.
+- **Concurrency: always-latest, never-queued.** A `sync.Mutex` +
+  single-slot `pendingSnapshot` serialises sync passes. Snapshots that
+  arrive while a sync is running overwrite the slot — only the most
+  recent is processed when the running pass finishes. The background
+  goroutine uses a detached `context.Background()` with a 60s timeout
+  so the host's per-call ctx (cancelled immediately after
+  `NotifyTagOrders` returns) cannot kill an in-flight sync.
+- **Errors are best-effort.** The host treats `NotifyTagOrders` failures
+  as Debug-only; the plugin loggs each Soggl HTTP failure via
+  `Log("warn", …)` and moves on. The next user-side mutation re-sends
+  the full snapshot so dropped syncs self-heal.
 
 ## Authentication to Soggl
 
