@@ -1,6 +1,13 @@
 version: 2
 
-project_name: hashpoint-plugin-soggl
+# project_name MUST equal the plugin's `name` in manifest.toml AND the
+# entry in DustHoff/hashpoint-plugin-manager's repo.json. The plugin
+# manager derives the release asset name from it as
+# `<project_name>_<version>_<os>_<arch>.zip` and expects the same
+# string as the single top-level directory inside the zip. A mismatch
+# surfaces at install time as `asset "<expected>" not found in release`.
+# Keep this in sync with manifest.toml and internal/plugin.Name.
+project_name: soggl
 
 before:
   hooks:
@@ -8,9 +15,12 @@ before:
     - sh scripts/inject-manifest-version.sh {{ .Version }}
 
 builds:
-  - id: hashpoint-plugin-soggl
+  - id: soggl
+    # Source directory under cmd/ stays at its historical name; only the
+    # produced binary uses the short plugin identity so the host's
+    # `<plugins>/<name>/<name>.exe` lookup finds it.
     main: ./cmd/hashpoint-plugin-soggl
-    binary: hashpoint-plugin-soggl
+    binary: soggl
     env:
       - CGO_ENABLED=0
     goos:
@@ -26,19 +36,20 @@ builds:
       - -H=windowsgui
       # Inject the release version into the in-source placeholder
       # `pluginVersion = "dev"` so Metadata().Version reports the git tag.
+      # The ldflag path is the Go module path (unchanged), not the plugin
+      # identity — those are two separate concepts.
       - -X github.com/dusthoff/hashpoint-plugin-soggl/internal/plugin.pluginVersion={{ .Version }}
 
 archives:
   - id: default
     ids:
-      - hashpoint-plugin-soggl
+      - soggl
     formats:
       - zip
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    # Nest every archive entry inside a `hashpoint-plugin-soggl/` directory
-    # so consumers (the Hashpoint host's PluginManagement handler installs
-    # into <PluginsDir>/<name>/) get a ready-to-drop plugin folder when
-    # they extract the zip rather than loose files at the archive root.
+    # Nest every archive entry inside a `soggl/` directory so the plugin
+    # manager's "exactly one top-level directory named <name>/" check
+    # passes when it extracts the zip into <PluginsDir>/<name>/.
     wrap_in_directory: "{{ .ProjectName }}"
     files:
       # Use the version-substituted manifest produced by the inject hook

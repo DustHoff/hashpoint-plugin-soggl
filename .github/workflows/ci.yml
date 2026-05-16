@@ -53,4 +53,7 @@ jobs:
           GOARCH: amd64
         # Mirrors .goreleaser.yml: -H=windowsgui suppresses the console
         # window when the host launches the plugin subprocess on Windows.
-        run: go build -trimpath -ldflags="-s -w -H=windowsgui" -o /tmp/hashpoint-plugin-soggl.exe ./cmd/hashpoint-plugin-soggl
+        # Output name mirrors the release binary (`soggl.exe`) so this
+        # smoke build catches a divergence between cmd/ source path and
+        # the published artifact name early.
+        run: go build -trimpath -ldflags="-s -w -H=windowsgui" -o /tmp/soggl.exe ./cmd/hashpoint-plugin-soggl
