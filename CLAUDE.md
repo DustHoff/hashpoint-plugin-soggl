@@ -123,8 +123,8 @@ and pushes the diff. Key contract decisions — change only with explicit
 user sign-off, because changing them mid-flight can mass-toggle Soggl
 rules:
 
-- **Filter is the join key.** A Hashpoint `TagPath` of `lmis/betrieb`
-  becomes the Soggl `filter` `"#lmis #betrieb"` (`pathToFilter` in
+- **Filter is the join key.** A Hashpoint `TagPath` of `parent/child`
+  becomes the Soggl `filter` `"#parent #child"` (`pathToFilter` in
   `plugin.go`). The plugin looks up Soggl rules by this filter string.
 - **Leaf-only by default (`leaf_only_sync=true`).** Only Hashpoint tags
   with no descendants in the snapshot become Soggl rules. The snapshot
@@ -140,10 +140,9 @@ rules:
   `ListTags` (Soggl → Hashpoint) is unaffected — Hashpoint's
   `EnsureByPath` creates parent tags itself when a leaf is imported.
 - **Lowest-id wins on duplicate filters.** Soggl tolerates multiple
-  rules with the same filter (e.g. `#ivz` appears twice in
-  `samples/soggl-rules.json`). The plugin treats the rule with the
-  lowest numeric `id` as the one to update; siblings fall through to
-  the disable phase.
+  rules with the same filter — observed in the wild. The plugin treats
+  the rule with the lowest numeric `id` as the one to update; siblings
+  fall through to the disable phase.
 - **All Soggl rules are considered plugin-managed.** Every rule that
   does *not* match a current Hashpoint tag with `OrderName != ""` gets
   `enabled=false` (idempotent — already-disabled rules are left

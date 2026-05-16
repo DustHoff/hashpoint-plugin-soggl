@@ -455,8 +455,8 @@ func filterToPath(filter string) string {
 
 // pathToFilter is the inverse of filterToPath. The TagOrderMapping
 // snapshot delivers paths with the leading "#" stripped from every
-// segment ("lmis/betrieb"), but Soggl expects each filter token to
-// carry the "#" prefix ("#lmis #betrieb"). Re-add it segment-wise and
+// segment ("parent/child"), but Soggl expects each filter token to
+// carry the "#" prefix ("#parent #child"). Re-add it segment-wise and
 // join with spaces.
 func pathToFilter(path string) string {
 	segments := strings.Split(path, "/")
