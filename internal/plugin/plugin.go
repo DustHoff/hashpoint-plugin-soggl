@@ -26,16 +26,18 @@ const (
 	// the short form.
 	Name = "soggl"
 
-	cfgEntraScope  = "entra_scope"
-	cfgSogglHost   = "soggl_host"
-	cfgJobsWindow  = "jobs_window"
-	cfgSyncToSoggl = "sync_to_soggl"
+	cfgEntraScope   = "entra_scope"
+	cfgSogglHost    = "soggl_host"
+	cfgJobsWindow   = "jobs_window"
+	cfgSyncToSoggl  = "sync_to_soggl"
+	cfgLeafOnlySync = "leaf_only_sync"
 
 	windowToday = "today"
 	windowMonth = "month"
 
-	defaultJobsWindow  = windowToday
-	defaultSyncToSoggl = true
+	defaultJobsWindow   = windowToday
+	defaultSyncToSoggl  = true
+	defaultLeafOnlySync = true
 
 	nonBillablePattern = "#NF"
 
@@ -55,10 +57,11 @@ var pluginVersion = "dev"
 
 // config is the validated, in-memory form of sdk.PluginConfig.
 type config struct {
-	entraScope  string
-	sogglHost   string
-	jobsWindow  string
-	syncToSoggl bool
+	entraScope   string
+	sogglHost    string
+	jobsWindow   string
+	syncToSoggl  bool
+	leafOnlySync bool
 }
 
 // Plugin implements sdk.Plugin and sdk.TagProviderHandler.
@@ -145,15 +148,36 @@ func parseConfig(in sdk.PluginConfig) (config, error) {
 	if _, ok := jobsWindowFns[window]; !ok {
 		return config{}, fmt.Errorf("%w: %s must be one of: %s, %s", sdk.ErrConfigInvalid, cfgJobsWindow, windowToday, windowMonth)
 	}
-	syncToSoggl := defaultSyncToSoggl
-	if raw := strings.TrimSpace(in.Fields[cfgSyncToSoggl]); raw != "" {
-		v, err := strconv.ParseBool(raw)
-		if err != nil {
-			return config{}, fmt.Errorf("%w: %s must be true or false", sdk.ErrConfigInvalid, cfgSyncToSoggl)
-		}
-		syncToSoggl = v
+	syncToSoggl, err := parseBoolField(in, cfgSyncToSoggl, defaultSyncToSoggl)
+	if err != nil {
+		return config{}, err
 	}
-	return config{entraScope: scope, sogglHost: host, jobsWindow: window, syncToSoggl: syncToSoggl}, nil
+	leafOnlySync, err := parseBoolField(in, cfgLeafOnlySync, defaultLeafOnlySync)
+	if err != nil {
+		return config{}, err
+	}
+	return config{
+		entraScope:   scope,
+		sogglHost:    host,
+		jobsWindow:   window,
+		syncToSoggl:  syncToSoggl,
+		leafOnlySync: leafOnlySync,
+	}, nil
+}
+
+// parseBoolField reads a boolean PluginConfig field with a default for
+// the unset/empty case. Empty string ⇒ def; anything else passes through
+// strconv.ParseBool (so "true"/"false"/"1"/"0"/"True" are accepted).
+func parseBoolField(in sdk.PluginConfig, key string, def bool) (bool, error) {
+	raw := strings.TrimSpace(in.Fields[key])
+	if raw == "" {
+		return def, nil
+	}
+	v, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false, fmt.Errorf("%w: %s must be true or false", sdk.ErrConfigInvalid, key)
+	}
+	return v, nil
 }
 
 // jobsWindowFns maps a jobs_window value to a function computing
@@ -292,9 +316,10 @@ func (p *Plugin) syncLoop() {
 		p.mu.RLock()
 		client := p.client
 		host := p.host
+		leafOnly := p.cfg.leafOnlySync
 		p.mu.RUnlock()
 		if client != nil {
-			if err := p.runSync(ctx, client, host, snap); err != nil {
+			if err := p.runSync(ctx, client, host, snap, leafOnly); err != nil {
 				logWarn(ctx, host, "soggl sync failed", err)
 			}
 		}
@@ -305,7 +330,14 @@ func (p *Plugin) syncLoop() {
 // runSync executes a single Hashpoint→Soggl sync pass synchronously
 // against the given client. Extracted from syncLoop so tests can drive
 // the algorithm directly without goroutine timing.
-func (p *Plugin) runSync(ctx context.Context, client *soggl.Client, host sdk.HostAPI, mappings []sdk.TagOrderMapping) error {
+//
+// leafOnly trims the snapshot to leaf tags before any Soggl writes
+// happen: a tag whose path is a strict prefix of another tag's path in
+// the same snapshot is skipped — Create, Update, and the blank-fragment
+// case all bail out — so only the leaves end up as Soggl rules. Parent
+// rules that previously existed fall through to the disable phase like
+// any other rule without a current managed-leaf match.
+func (p *Plugin) runSync(ctx context.Context, client *soggl.Client, host sdk.HostAPI, mappings []sdk.TagOrderMapping, leafOnly bool) error {
 	rules, err := client.ListRules(ctx)
 	if err != nil {
 		return fmt.Errorf("pull soggl rules: %w", err)
@@ -323,8 +355,21 @@ func (p *Plugin) runSync(ctx context.Context, client *soggl.Client, host sdk.Hos
 		}
 	}
 
+	// Pre-compute the parent set so the loop below can skip non-leaf
+	// tags in O(1). Nil when leafOnly is false — the skip then never
+	// fires.
+	var parentSet map[string]struct{}
+	if leafOnly {
+		parentSet = buildParentSet(mappings)
+	}
+
 	managed := make(map[int64]struct{}, len(mappings))
 	for _, m := range mappings {
+		if leafOnly {
+			if _, isParent := parentSet[m.TagPath]; isParent {
+				continue
+			}
+		}
 		targetFilter := pathToFilter(m.TagPath)
 		if targetFilter == "" {
 			continue
@@ -410,8 +455,8 @@ func filterToPath(filter string) string {
 
 // pathToFilter is the inverse of filterToPath. The TagOrderMapping
 // snapshot delivers paths with the leading "#" stripped from every
-// segment ("lmis/betrieb"), but Soggl expects each filter token to
-// carry the "#" prefix ("#lmis #betrieb"). Re-add it segment-wise and
+// segment ("parent/child"), but Soggl expects each filter token to
+// carry the "#" prefix ("#parent #child"). Re-add it segment-wise and
 // join with spaces.
 func pathToFilter(path string) string {
 	segments := strings.Split(path, "/")
@@ -427,6 +472,29 @@ func pathToFilter(path string) string {
 		parts = append(parts, seg)
 	}
 	return strings.Join(parts, " ")
+}
+
+// buildParentSet returns the set of every TagPath that is a strict
+// prefix of some other TagPath in mappings — i.e. every tag that has at
+// least one descendant in the snapshot. A leaf is then any TagPath not
+// in the returned set. Used by runSync when leaf_only_sync is enabled.
+//
+// Snapshot semantics: the host delivers EVERY tag in its store (also
+// those without OrderName), so the hierarchy seen here is the
+// authoritative shape of the user's tag tree. A subtag without an
+// OrderName still promotes its parent to "non-leaf".
+func buildParentSet(mappings []sdk.TagOrderMapping) map[string]struct{} {
+	set := make(map[string]struct{})
+	for _, m := range mappings {
+		if m.TagPath == "" {
+			continue
+		}
+		segments := strings.Split(m.TagPath, "/")
+		for i := 1; i < len(segments); i++ {
+			set[strings.Join(segments[:i], "/")] = struct{}{}
+		}
+	}
+	return set
 }
 
 func tokenFunc(host sdk.HostAPI, scope string) soggl.TokenFunc {

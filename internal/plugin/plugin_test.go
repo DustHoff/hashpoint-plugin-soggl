@@ -25,8 +25,8 @@ func TestFilterToPath(t *testing.T) {
 	cases := []struct {
 		in, want string
 	}{
-		{"#deg", "#deg"},
-		{"#lmis #betrieb", "#lmis/#betrieb"},
+		{"#solo", "#solo"},
+		{"#parent #child", "#parent/#child"},
 		{"#a #b #c", "#a/#b/#c"},
 		{"  #spaced   #out  ", "#spaced/#out"},
 		{"", ""},
@@ -43,10 +43,10 @@ func TestPathToFilter(t *testing.T) {
 	cases := []struct {
 		in, want string
 	}{
-		{"lmis/betrieb", "#lmis #betrieb"},
-		{"deg", "#deg"},
+		{"parent/child", "#parent #child"},
+		{"solo", "#solo"},
 		{"a/b/c", "#a #b #c"},
-		{"#lmis/#betrieb", "#lmis #betrieb"}, // already-prefixed segments are not double-prefixed
+		{"#parent/#child", "#parent #child"}, // already-prefixed segments are not double-prefixed
 		{"", ""},
 		{"/", ""},
 		{"  /  ", ""},
@@ -83,7 +83,7 @@ func TestJobsWindowMonth(t *testing.T) {
 func TestParseConfigDefaults(t *testing.T) {
 	cfg, err := parseConfig(sdk.PluginConfig{Fields: map[string]string{
 		cfgEntraScope: "api://soggl/.default",
-		cfgSogglHost:  "https://soggl.lmis.de",
+		cfgSogglHost:  "https://soggl.example",
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -93,6 +93,9 @@ func TestParseConfigDefaults(t *testing.T) {
 	}
 	if cfg.syncToSoggl != defaultSyncToSoggl {
 		t.Errorf("syncToSoggl default: got %v, want %v", cfg.syncToSoggl, defaultSyncToSoggl)
+	}
+	if cfg.leafOnlySync != defaultLeafOnlySync {
+		t.Errorf("leafOnlySync default: got %v, want %v", cfg.leafOnlySync, defaultLeafOnlySync)
 	}
 }
 
@@ -144,6 +147,109 @@ func TestParseConfigSyncToSogglInvalid(t *testing.T) {
 	}})
 	if !errors.Is(err, sdk.ErrConfigInvalid) {
 		t.Errorf("got %v, want ErrConfigInvalid", err)
+	}
+}
+
+func TestParseConfigLeafOnlySync(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"true", true},
+		{"false", false},
+		{"True", true},
+		{"1", true},
+		{"0", false},
+	}
+	for _, tc := range cases {
+		cfg, err := parseConfig(sdk.PluginConfig{Fields: map[string]string{
+			cfgEntraScope:   "s",
+			cfgSogglHost:    "h",
+			cfgLeafOnlySync: tc.in,
+		}})
+		if err != nil {
+			t.Fatalf("%q: %v", tc.in, err)
+		}
+		if cfg.leafOnlySync != tc.want {
+			t.Errorf("%q: got %v, want %v", tc.in, cfg.leafOnlySync, tc.want)
+		}
+	}
+}
+
+func TestParseConfigLeafOnlySyncInvalid(t *testing.T) {
+	_, err := parseConfig(sdk.PluginConfig{Fields: map[string]string{
+		cfgEntraScope:   "s",
+		cfgSogglHost:    "h",
+		cfgLeafOnlySync: "maybe",
+	}})
+	if !errors.Is(err, sdk.ErrConfigInvalid) {
+		t.Errorf("got %v, want ErrConfigInvalid", err)
+	}
+}
+
+func TestBuildParentSet(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []sdk.TagOrderMapping
+		want map[string]struct{}
+	}{
+		{
+			name: "empty",
+			in:   nil,
+			want: map[string]struct{}{},
+		},
+		{
+			name: "all leaves",
+			in: []sdk.TagOrderMapping{
+				{TagPath: "solo"},
+				{TagPath: "shared"},
+			},
+			want: map[string]struct{}{},
+		},
+		{
+			name: "two-level hierarchy",
+			in: []sdk.TagOrderMapping{
+				{TagPath: "parent/child"},
+				{TagPath: "parent/sibling"},
+			},
+			want: map[string]struct{}{"parent": {}},
+		},
+		{
+			name: "parent itself in snapshot still counts as parent when descendant present",
+			in: []sdk.TagOrderMapping{
+				{TagPath: "parent"},
+				{TagPath: "parent/child"},
+			},
+			want: map[string]struct{}{"parent": {}},
+		},
+		{
+			name: "three-level adds every strict prefix",
+			in: []sdk.TagOrderMapping{
+				{TagPath: "a/b/c"},
+			},
+			want: map[string]struct{}{"a": {}, "a/b": {}},
+		},
+		{
+			name: "empty tag path is skipped",
+			in: []sdk.TagOrderMapping{
+				{TagPath: ""},
+				{TagPath: "x"},
+			},
+			want: map[string]struct{}{},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := buildParentSet(tc.in)
+			if len(got) != len(tc.want) {
+				t.Fatalf("size: got %d (%v), want %d (%v)", len(got), got, len(tc.want), tc.want)
+			}
+			for k := range tc.want {
+				if _, ok := got[k]; !ok {
+					t.Errorf("missing parent %q in %v", k, got)
+				}
+			}
+		})
 	}
 }
 
@@ -335,8 +441,8 @@ func TestRunSync_CreatesMissingRule(t *testing.T) {
 	defer cleanup()
 
 	err := p.runSync(context.Background(), p.client, p.host, []sdk.TagOrderMapping{
-		{TagPath: "lmis/betrieb", OrderName: "Betrieb LMIS 2026"},
-	})
+		{TagPath: "parent/child", OrderName: "Order Alpha 2026"},
+	}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -344,10 +450,10 @@ func TestRunSync_CreatesMissingRule(t *testing.T) {
 		t.Fatalf("posts: got %d, want 1", len(fake.posts))
 	}
 	got := fake.posts[0]
-	if got.Filter != "#lmis #betrieb" {
-		t.Errorf("filter: got %q, want %q", got.Filter, "#lmis #betrieb")
+	if got.Filter != "#parent #child" {
+		t.Errorf("filter: got %q, want %q", got.Filter, "#parent #child")
 	}
-	if got.SoncosoAssignment.Fragment != "Betrieb LMIS 2026" {
+	if got.SoncosoAssignment.Fragment != "Order Alpha 2026" {
 		t.Errorf("fragment: got %q", got.SoncosoAssignment.Fragment)
 	}
 	if !got.Enabled {
@@ -363,7 +469,7 @@ func TestRunSync_UpdatesExistingPreservesFields(t *testing.T) {
 		ID:                42,
 		Enabled:           true,
 		Score:             214, // user-tuned, must survive
-		Filter:            "#lmis #betrieb",
+		Filter:            "#parent #child",
 		NonBillable:       soggl.NonBillable{Pattern: "#NF", DefaultToNonBillable: true},
 		Ignore:            soggl.Ignore{},
 		SoncosoAssignment: soggl.SoncosoAssignment{Fragment: "old fragment"},
@@ -373,8 +479,8 @@ func TestRunSync_UpdatesExistingPreservesFields(t *testing.T) {
 	defer cleanup()
 
 	err := p.runSync(context.Background(), p.client, p.host, []sdk.TagOrderMapping{
-		{TagPath: "lmis/betrieb", OrderName: "new fragment"},
-	})
+		{TagPath: "parent/child", OrderName: "new fragment"},
+	}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -400,18 +506,18 @@ func TestRunSync_UpdatesExistingPreservesFields(t *testing.T) {
 }
 
 func TestRunSync_DuplicateFilterLowestIdWins(t *testing.T) {
-	// Two rules share "#ivz" — only id=5 (lowest) gets the fragment
+	// Two rules share "#shared" — only id=5 (lowest) gets the fragment
 	// update; id=9 falls through to disable phase.
 	fake := newFakeSoggl(
-		soggl.Rule{ID: 5, Enabled: true, Filter: "#ivz", SoncosoAssignment: soggl.SoncosoAssignment{Fragment: "old A"}},
-		soggl.Rule{ID: 9, Enabled: true, Filter: "#ivz", SoncosoAssignment: soggl.SoncosoAssignment{Fragment: "old B"}},
+		soggl.Rule{ID: 5, Enabled: true, Filter: "#shared", SoncosoAssignment: soggl.SoncosoAssignment{Fragment: "old A"}},
+		soggl.Rule{ID: 9, Enabled: true, Filter: "#shared", SoncosoAssignment: soggl.SoncosoAssignment{Fragment: "old B"}},
 	)
 	p, cleanup := configuredPlugin(t, fake, true)
 	defer cleanup()
 
 	err := p.runSync(context.Background(), p.client, p.host, []sdk.TagOrderMapping{
-		{TagPath: "ivz", OrderName: "IVZ Auftrag"},
-	})
+		{TagPath: "shared", OrderName: "Shared Order"},
+	}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -435,8 +541,8 @@ func TestRunSync_DuplicateFilterLowestIdWins(t *testing.T) {
 	if updated == nil {
 		t.Fatal("no PUT for id=5")
 	}
-	if updated.SoncosoAssignment.Fragment != "IVZ Auftrag" {
-		t.Errorf("id=5 fragment: got %q, want %q", updated.SoncosoAssignment.Fragment, "IVZ Auftrag")
+	if updated.SoncosoAssignment.Fragment != "Shared Order" {
+		t.Errorf("id=5 fragment: got %q, want %q", updated.SoncosoAssignment.Fragment, "Shared Order")
 	}
 	if !updated.Enabled {
 		t.Errorf("id=5 should stay enabled")
@@ -457,7 +563,7 @@ func TestRunSync_DisablesOrphans(t *testing.T) {
 	p, cleanup := configuredPlugin(t, fake, true)
 	defer cleanup()
 
-	err := p.runSync(context.Background(), p.client, p.host, nil)
+	err := p.runSync(context.Background(), p.client, p.host, nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -485,7 +591,7 @@ func TestRunSync_ReEnablesPreviouslyDisabledRule(t *testing.T) {
 
 	err := p.runSync(context.Background(), p.client, p.host, []sdk.TagOrderMapping{
 		{TagPath: "proj", OrderName: "Reactivated"},
-	})
+	}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -513,7 +619,7 @@ func TestRunSync_BlankFragmentOnOrderRemoval(t *testing.T) {
 
 	err := p.runSync(context.Background(), p.client, p.host, []sdk.TagOrderMapping{
 		{TagPath: "proj", OrderName: ""},
-	})
+	}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -542,12 +648,105 @@ func TestRunSync_BlankAlreadyBlankIsNoop(t *testing.T) {
 
 	err := p.runSync(context.Background(), p.client, p.host, []sdk.TagOrderMapping{
 		{TagPath: "proj", OrderName: ""},
-	})
+	}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(fake.puts) != 0 {
 		t.Errorf("expected no PUTs (rule already in desired state), got %d", len(fake.puts))
+	}
+}
+
+func TestRunSync_LeafOnly_SkipsParentAndDisablesItsRule(t *testing.T) {
+	// Snapshot has a parent + two children. With leafOnly=true the
+	// parent is skipped (no Create/Update/Disable-as-managed) — the
+	// pre-existing rule for #parent falls into the disable phase like
+	// any other unowned rule. The two leaf rules are POSTed.
+	existingParent := soggl.Rule{
+		ID: 1, Enabled: true, Filter: "#parent",
+		SoncosoAssignment: soggl.SoncosoAssignment{Fragment: "Parent fragment"},
+	}
+	fake := newFakeSoggl(existingParent)
+	p, cleanup := configuredPlugin(t, fake, true)
+	defer cleanup()
+
+	err := p.runSync(context.Background(), p.client, p.host, []sdk.TagOrderMapping{
+		{TagPath: "parent", OrderName: "Should be ignored"},
+		{TagPath: "parent/child", OrderName: "Order A"},
+		{TagPath: "parent/sibling", OrderName: "Order B"},
+	}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Two POSTs (the two leaves); the parent must not appear.
+	if len(fake.posts) != 2 {
+		t.Fatalf("posts: got %d, want 2", len(fake.posts))
+	}
+	for _, p := range fake.posts {
+		if p.Filter == "#parent" {
+			t.Errorf("parent rule was created even though leafOnly is true: %+v", p)
+		}
+	}
+
+	// One PUT: the pre-existing parent rule disabled by the orphan phase.
+	if len(fake.puts) != 1 {
+		t.Fatalf("puts: got %d, want 1 (parent-rule disable)", len(fake.puts))
+	}
+	got := fake.puts[0]
+	if got.ID != 1 || got.Enabled {
+		t.Errorf("expected id=1 disabled, got %+v", got)
+	}
+}
+
+func TestRunSync_LeafOnly_ParentWithOrderNameStillSkipped(t *testing.T) {
+	// Even if the parent has its own OrderName, leafOnly=true means
+	// "strict skip" — the parent is treated the same as if it had no
+	// order. No rule is created for it; an existing one would be
+	// disabled (covered by the previous test).
+	fake := newFakeSoggl()
+	p, cleanup := configuredPlugin(t, fake, true)
+	defer cleanup()
+
+	err := p.runSync(context.Background(), p.client, p.host, []sdk.TagOrderMapping{
+		{TagPath: "parent", OrderName: "Parent order"},
+		{TagPath: "parent/child", OrderName: "Leaf order"},
+	}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(fake.posts) != 1 {
+		t.Fatalf("posts: got %d, want 1", len(fake.posts))
+	}
+	if fake.posts[0].Filter != "#parent #child" {
+		t.Errorf("expected only the leaf to be created, got %+v", fake.posts[0])
+	}
+}
+
+func TestRunSync_LeafOnlyDisabled_SyncsParentsToo(t *testing.T) {
+	// leafOnly=false restores the pre-feature behaviour: every tag with
+	// an OrderName is synced, parents included.
+	fake := newFakeSoggl()
+	p, cleanup := configuredPlugin(t, fake, true)
+	defer cleanup()
+
+	err := p.runSync(context.Background(), p.client, p.host, []sdk.TagOrderMapping{
+		{TagPath: "parent", OrderName: "Parent order"},
+		{TagPath: "parent/child", OrderName: "Leaf order"},
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.posts) != 2 {
+		t.Fatalf("posts: got %d, want 2 (parent + leaf)", len(fake.posts))
+	}
+	filters := map[string]bool{}
+	for _, p := range fake.posts {
+		filters[p.Filter] = true
+	}
+	if !filters["#parent"] || !filters["#parent #child"] {
+		t.Errorf("missing expected filters in %v", filters)
 	}
 }
 
@@ -559,7 +758,7 @@ func TestNotifyTagOrders_KillSwitch(t *testing.T) {
 	defer cleanup()
 
 	err := p.NotifyTagOrders(context.Background(), []sdk.TagOrderMapping{
-		{TagPath: "lmis/betrieb", OrderName: "X"},
+		{TagPath: "parent/child", OrderName: "X"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -585,7 +784,7 @@ func TestNotifyTagOrders_AsyncCompletes(t *testing.T) {
 	p.syncMu.Unlock()
 
 	if err := p.NotifyTagOrders(context.Background(), []sdk.TagOrderMapping{
-		{TagPath: "lmis/betrieb", OrderName: "Betrieb"},
+		{TagPath: "parent/child", OrderName: "Order A"},
 	}); err != nil {
 		t.Fatal(err)
 	}
