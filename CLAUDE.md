@@ -4,12 +4,44 @@ Project-specific context for Claude Code in `hashpoint-plugin-soggl`.
 
 ## What this project is
 
-`hashpoint-plugin-soggl` is a Hashpoint plugin that bridges Hashpoint with the
-internal **Soggl** application. It implements the `tag_provider` capability —
-it supplies tags and orders to the Hashpoint host by calling the Soggl API.
+`hashpoint-plugin-soggl` (the repository / Go module) ships the
+**`soggl`** Hashpoint plugin — a bridge to the internal **Soggl**
+application. It implements the `tag_provider` capability: it supplies
+tags and orders to the Hashpoint host by calling the Soggl API.
 
-The plugin runs as a separate subprocess; the host communicates with it over
-`net/rpc` multiplexed via `hashicorp/go-plugin`.
+The plugin runs as a separate subprocess; the host communicates with it
+over `net/rpc` multiplexed via `hashicorp/go-plugin`.
+
+### Plugin identity vs. repository name
+
+Two names coexist and must NOT drift:
+
+| Concept                     | Value                                          |
+|-----------------------------|------------------------------------------------|
+| GitHub repository / Go module path | `hashpoint-plugin-soggl`                |
+| Source directory under `cmd/`     | `cmd/hashpoint-plugin-soggl/`           |
+| Plugin identity (everywhere else) | **`soggl`**                             |
+
+"Plugin identity" means **all** of the following at the same time, and
+they MUST agree exactly:
+
+- `manifest.toml` → `name = "soggl"`
+- `internal/plugin.Name` constant (returned in `Metadata().Name`)
+- `.goreleaser.yml` → `project_name`, `builds[].id`, `builds[].binary`,
+  and `archives[].ids` → all `soggl`
+- The release asset filename → `soggl_<ver>_<os>_<arch>.zip` (+ `.sha256`)
+- The single top-level directory inside that zip → `soggl/`
+- The bundled binary → `soggl/soggl.exe`
+- The catalog entry in `DustHoff/hashpoint-plugin-manager`'s `repo.json`
+  → `"name": "soggl"`
+
+The plugin manager (`DustHoff/hashpoint-plugin-manager`) resolves the
+asset name with the pattern `{name}_{version}_{os}_{arch}.zip` where
+`{name}` is the **catalog entry name** — divergence surfaces at install
+time as `asset "<expected>" not found in release vX.Y.Z`. The repo /
+module path stays the long form for historical reasons; only the ldflag
+that injects `pluginVersion` references it
+(`-X github.com/dusthoff/hashpoint-plugin-soggl/internal/plugin.pluginVersion=…`).
 
 ## Language and build constraints
 

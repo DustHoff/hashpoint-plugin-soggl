@@ -1,4 +1,4 @@
-name         = "hashpoint-plugin-soggl"
+name         = "soggl"
 # version is rewritten by scripts/inject-manifest-version.sh at release time
 # (called from .goreleaser.yml `before.hooks`). Leave at "0.0.0-dev" in source.
 version      = "0.0.0-dev"

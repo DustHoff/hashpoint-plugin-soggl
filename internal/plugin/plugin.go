@@ -16,7 +16,15 @@ import (
 )
 
 const (
-	Name = "hashpoint-plugin-soggl"
+	// Name is what the host treats as the plugin's identity: it must
+	// match (a) manifest.toml's `name`, (b) the install directory under
+	// PluginsDir, and (c) the catalog entry in the plugin manager's
+	// repo.json. The plugin manager also derives the release asset
+	// name from this (`<Name>_<version>_<os>_<arch>.zip`). The
+	// repository / Go module path stay `hashpoint-plugin-soggl` for
+	// historical reasons; only the plugin's user-visible identity is
+	// the short form.
+	Name = "soggl"
 
 	cfgEntraScope  = "entra_scope"
 	cfgSogglHost   = "soggl_host"
