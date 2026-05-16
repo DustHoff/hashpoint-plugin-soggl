@@ -2,7 +2,7 @@ module github.com/dusthoff/hashpoint-plugin-soggl
 
 go 1.26
 
-require github.com/dusthoff/hashpoint v1.9.0
+require github.com/dusthoff/hashpoint v1.10.0
 
 require (
 	github.com/fatih/color v1.13.0 // indirect

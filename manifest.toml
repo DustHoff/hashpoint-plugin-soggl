@@ -21,3 +21,9 @@ label    = "Jobs window"
 type     = "text"
 required = false
 default  = "today"
+
+[config_schema.fields.sync_to_soggl]
+label    = "Sync tag-order changes to Soggl"
+type     = "boolean"
+required = false
+default  = "true"
