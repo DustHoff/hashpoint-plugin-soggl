@@ -198,6 +198,16 @@ func dateOnly(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
 }
 
+// ListTags projects every ENABLED Soggl rule into a Hashpoint tag path.
+//
+// Disabled rules are skipped on purpose, to stay consistent with the
+// Hashpoint→Soggl sync: runSync's disable phase uses enabled=false as a
+// tombstone — it disables (Soggl rules are never deleted) the rule of a
+// tag that no longer exists or is no longer claimed by Hashpoint. Since
+// the host's import is additive (EnsureByPath never deletes), importing a
+// disabled rule would resurrect a tag the user just deleted, producing a
+// delete↔re-import ping-pong. Filtering on Enabled makes a path import
+// iff at least one enabled rule carries its filter.
 func (p *Plugin) ListTags(ctx context.Context) ([]sdk.ImportedTag, error) {
 	p.mu.RLock()
 	client := p.client
@@ -216,6 +226,9 @@ func (p *Plugin) ListTags(ctx context.Context) ([]sdk.ImportedTag, error) {
 	out := make([]sdk.ImportedTag, 0, len(rules))
 	seen := make(map[string]struct{}, len(rules))
 	for _, r := range rules {
+		if !r.Enabled {
+			continue
+		}
 		path := filterToPath(r.Filter)
 		if path == "" {
 			continue

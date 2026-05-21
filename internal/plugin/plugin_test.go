@@ -435,6 +435,63 @@ func configuredPlugin(t *testing.T, fake *fakeSoggl, syncToSoggl bool) (*Plugin,
 	return p, srv.Close
 }
 
+func TestListTags_SkipsDisabledRules(t *testing.T) {
+	// Only enabled Soggl rules become Hashpoint tags. A disabled rule is
+	// the sync's tombstone for a tag that should no longer exist;
+	// importing it would resurrect that tag.
+	fake := newFakeSoggl(
+		soggl.Rule{ID: 1, Enabled: true, Filter: "#alpha"},
+		soggl.Rule{ID: 2, Enabled: false, Filter: "#beta"},
+		soggl.Rule{ID: 3, Enabled: true, Filter: "#parent #child"},
+		soggl.Rule{ID: 4, Enabled: false, Filter: ""},
+	)
+	p, cleanup := configuredPlugin(t, fake, false)
+	defer cleanup()
+
+	tags, err := p.ListTags(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := make(map[string]bool, len(tags))
+	for _, tg := range tags {
+		got[tg.Path] = true
+	}
+	want := map[string]bool{"#alpha": true, "#parent/#child": true}
+	if len(got) != len(want) {
+		t.Fatalf("paths: got %v, want %v", got, want)
+	}
+	for pth := range want {
+		if !got[pth] {
+			t.Errorf("missing expected path %q in %v", pth, got)
+		}
+	}
+	if got["#beta"] {
+		t.Errorf("disabled rule #beta must not be imported")
+	}
+}
+
+func TestListTags_DuplicateFilterEnabledWins(t *testing.T) {
+	// Soggl tolerates multiple rules with the same filter. A path is
+	// imported as long as at least one rule carrying that filter is
+	// enabled, regardless of the order the API returns them in (a
+	// disabled rule never reserves the path).
+	fake := newFakeSoggl(
+		soggl.Rule{ID: 1, Enabled: false, Filter: "#shared"},
+		soggl.Rule{ID: 2, Enabled: true, Filter: "#shared"},
+	)
+	p, cleanup := configuredPlugin(t, fake, false)
+	defer cleanup()
+
+	tags, err := p.ListTags(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tags) != 1 || tags[0].Path != "#shared" {
+		t.Fatalf("got %+v, want single #shared", tags)
+	}
+}
+
 func TestRunSync_CreatesMissingRule(t *testing.T) {
 	fake := newFakeSoggl()
 	p, cleanup := configuredPlugin(t, fake, true)
