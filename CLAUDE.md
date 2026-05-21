@@ -170,6 +170,31 @@ rules:
   `Log("warn", …)` and moves on. The next user-side mutation re-sends
   the full snapshot so dropped syncs self-heal.
 
+## Soggl → Hashpoint import (ListTags)
+
+`ListTags` projects Soggl rules into Hashpoint tag paths (the join key
+is the same `filter`↔`path` mapping as the sync — `filterToPath` in
+`plugin.go`). Contract decisions:
+
+- **Enabled-only.** Only rules with `enabled=true` are imported;
+  disabled rules are skipped. This is the mirror image of the sync's
+  disable phase: `enabled=false` is how the sync tombstones the rule of
+  a tag that no longer exists or is no longer claimed by Hashpoint
+  (Soggl rules are never deleted). Because the host's import is additive
+  (`EnsureByPath` only ever creates, never deletes), importing a
+  disabled rule would resurrect a tag the user just deleted — a
+  delete↔re-import ping-pong. Filtering on `enabled` keeps both
+  directions consistent. There is no config flag for this; it is always
+  on.
+- **A path imports iff ≥1 enabled rule carries its filter.** Soggl
+  tolerates duplicate-filter rules; a disabled duplicate never reserves
+  the path, so a single enabled rule among disabled siblings still
+  yields the tag, independent of API ordering.
+- **Path only.** `ImportedTag` carries just `Path` — no `OrderName`
+  seeding from `soncosoAssignment.fragment` (and `Description` stays
+  empty; the host reserves it). The host honours `OrderName` only on
+  first create, but the plugin deliberately does not set it here.
+
 ## Authentication to Soggl
 
 Soggl is called with an Entra ID access token obtained from the host on demand:
